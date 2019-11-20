@@ -244,20 +244,9 @@ func (c *oidcConnector) createIdentity(ctx context.Context, identity connector.I
 	}
 
 	var claims map[string]interface{}
-
-	var claimsMapped struct {
-		Username      string   `json:"name"`
-		Email         string   `json:"email"`
-		EmailVerified bool     `json:"email_verified"`
-		HostedDomain  string   `json:"hd"`
-		Groups        []string `json:"groups"`
-	}
+	var groups []string
 
 	if err := idToken.Claims(&claims); err != nil {
-		return identity, fmt.Errorf("oidc: failed to decode claims: %v", err)
-	}
-
-	if err := idToken.Claims(&claimsMapped); err != nil {
 		return identity, fmt.Errorf("oidc: failed to decode claims: %v", err)
 	}
 
@@ -270,14 +259,7 @@ func (c *oidcConnector) createIdentity(ctx context.Context, identity connector.I
 		if err := userInfo.Claims(&claims); err != nil {
 			return identity, fmt.Errorf("oidc: failed to decode userinfo claims: %v", err)
 		}
-
-		if err := userInfo.Claims(&claimsMapped); err != nil {
-			return identity, fmt.Errorf("oidc: failed to decode userinfo claims: %v", err)
-		}
-
 	}
-
-	c.logger.Debugf("Claims %v", claimsMapped.Groups)
 
 	cd := connectorData{
 		RefreshToken: []byte(token.RefreshToken),
@@ -326,12 +308,23 @@ func (c *oidcConnector) createIdentity(ctx context.Context, identity connector.I
 		}
 	}
 
+	groupsClaims, ok := claims["groups"].([]interface{})
+	if ok {
+		for _, v := range groupsClaims {
+			if s, ok := v.(string); ok {
+				groups = append(groups, s)
+			} else {
+				return identity, errors.New("malformed \"groups\" claim")
+			}
+		}
+	}
+
 	identity = connector.Identity{
 		UserID:        idToken.Subject,
 		Username:      name,
 		Email:         email,
 		EmailVerified: emailVerified,
-		Groups:        claimsMapped.Groups,
+		Groups:        groups,
 		ConnectorData: connData,
 	}
 
