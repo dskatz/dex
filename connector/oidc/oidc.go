@@ -62,6 +62,7 @@ var brokenAuthHeaderDomains = []string{
 	"oktapreview.com",
 }
 
+// connectorData stores information for sessions authenticated by this connector
 type connectorData struct {
 	RefreshToken []byte
 }
@@ -179,13 +180,12 @@ func (c *oidcConnector) LoginURL(s connector.Scopes, callbackURL, state string) 
 		if len(c.hostedDomains) > 1 {
 			preferredDomain = "*"
 		}
-		//return c.oauth2Config.AuthCodeURL(state, oauth2.SetAuthURLParam("hd", preferredDomain)), nil
 		opts = append(opts, oauth2.SetAuthURLParam("hd", preferredDomain))
 	}
+
 	if s.OfflineAccess {
 		opts = append(opts, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
 	}
-
 	return c.oauth2Config.AuthCodeURL(state, opts...), nil
 }
 
@@ -213,8 +213,27 @@ func (c *oidcConnector) HandleCallback(s connector.Scopes, r *http.Request) (ide
 	return c.createIdentity(r.Context(), identity, token)
 }
 
-func (c *oidcConnector) createIdentity(ctx context.Context, identity connector.Identity, token *oauth2.Token) (connector.Identity, error) {
+// Refresh is used to refresh a session with the refresh token provided by the IdP
+func (c *oidcConnector) Refresh(ctx context.Context, s connector.Scopes, identity connector.Identity) (connector.Identity, error) {
+	cd := connectorData{}
+	err := json.Unmarshal(identity.ConnectorData, &cd)
+	if err != nil {
+		return identity, fmt.Errorf("oidc: failed to unmarshal connector data: %v", err)
+	}
 
+	t := &oauth2.Token{
+		RefreshToken: string(cd.RefreshToken),
+		Expiry:       time.Now().Add(-time.Hour),
+	}
+	token, err := c.oauth2Config.TokenSource(ctx, t).Token()
+	if err != nil {
+		return identity, fmt.Errorf("oidc: failed to get refresh token: %v", err)
+	}
+
+	return c.createIdentity(ctx, identity, token)
+}
+
+func (c *oidcConnector) createIdentity(ctx context.Context, identity connector.Identity, token *oauth2.Token) (connector.Identity, error) {
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
 		return identity, errors.New("oidc: no id_token in token response")
@@ -245,7 +264,6 @@ func (c *oidcConnector) createIdentity(ctx context.Context, identity connector.I
 	// We immediately want to run getUserInfo if configured before we validate the claims
 	if c.getUserInfo {
 		userInfo, err := c.provider.UserInfo(ctx, oauth2.StaticTokenSource(token))
-		c.logger.Debugf("Got userinfo: %v", userInfo.Claims)
 		if err != nil {
 			return identity, fmt.Errorf("oidc: error loading userinfo: %v", err)
 		}
@@ -326,25 +344,4 @@ func (c *oidcConnector) createIdentity(ctx context.Context, identity connector.I
 	}
 
 	return identity, nil
-}
-
-// Refresh is implemented for backwards compatibility, even though it's a no-op.
-func (c *oidcConnector) Refresh(ctx context.Context, s connector.Scopes, identity connector.Identity) (connector.Identity, error) {
-	cd := connectorData{}
-	err := json.Unmarshal(identity.ConnectorData, &cd)
-	if err != nil {
-		return identity, fmt.Errorf("oidc: failed to unmarshal connector data: %v", err)
-	}
-
-	t := &oauth2.Token{
-		RefreshToken: string(cd.RefreshToken),
-		Expiry:       time.Now().Add(-time.Hour),
-	}
-
-	token, err := c.oauth2Config.TokenSource(ctx, t).Token()
-	if err != nil {
-		return identity, fmt.Errorf("oidc: failed to get refresh token: %v", err)
-	}
-
-	return c.createIdentity(ctx, identity, token)
 }

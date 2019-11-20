@@ -505,8 +505,6 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 	s.logger.Infof("login successful: connector %q, username=%q, preferred_username=%q, email=%q, groups=%q",
 		authReq.ConnectorID, claims.Username, claims.PreferredUsername, email, claims.Groups)
 
-	//return path.Join(s.issuerURL.Path, "/approval") + "?req=" + authReq.ID, nil
-
 	returnURL := path.Join(s.issuerURL.Path, "/approval") + "?req=" + authReq.ID
 	_, ok := conn.(connector.RefreshConnector)
 	if !ok {
@@ -519,7 +517,6 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 			s.logger.Errorf("failed to get offline session: %v", err)
 			return "", err
 		}
-		s.logger.Debugf("Getting offline session for %s", identity.UserID)
 		offlineSessions := storage.OfflineSessions{
 			UserID:        identity.UserID,
 			ConnID:        authReq.ConnectorID,
@@ -533,7 +530,6 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 			s.logger.Errorf("failed to create offline session: %v", err)
 			return "", err
 		}
-		s.logger.Debugf("Creating OfflineSession for %s ", identity.UserID)
 	} else {
 		// Update existing OfflineSession obj with new RefreshTokenRef.
 		if err := s.storage.UpdateOfflineSessions(session.UserID, session.ConnID, func(old storage.OfflineSessions) (storage.OfflineSessions, error) {
@@ -548,7 +544,6 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 	}
 
 	return returnURL, nil
-
 }
 
 func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
@@ -1025,12 +1020,13 @@ func (s *Server) handleRefreshToken(w http.ResponseWriter, r *http.Request, clie
 		return
 	}
 	ident := connector.Identity{
-		UserID:        refresh.Claims.UserID,
-		Username:      refresh.Claims.Username,
-		Email:         refresh.Claims.Email,
-		EmailVerified: refresh.Claims.EmailVerified,
-		Groups:        refresh.Claims.Groups,
-		ConnectorData: connectorData,
+		UserID:            refresh.Claims.UserID,
+		Username:          refresh.Claims.Username,
+		PreferredUsername: refresh.Claims.PreferredUsername,
+		Email:             refresh.Claims.Email,
+		EmailVerified:     refresh.Claims.EmailVerified,
+		Groups:            refresh.Claims.Groups,
+		ConnectorData:     connectorData,
 	}
 
 	// Can the connector refresh the identity? If so, attempt to refresh the data
@@ -1092,13 +1088,13 @@ func (s *Server) handleRefreshToken(w http.ResponseWriter, r *http.Request, clie
 		//
 		// UserID intentionally ignored for now.
 		old.Claims.Username = ident.Username
+		old.Claims.PreferredUsername = ident.PreferredUsername
 		old.Claims.Email = ident.Email
 		old.Claims.EmailVerified = ident.EmailVerified
 		old.Claims.Groups = ident.Groups
-		//old.ConnectorData = ident.ConnectorData
 		old.LastUsed = lastUsed
 
-		//ConnectorData has been moved to OfflineSession
+		// ConnectorData has been moved to OfflineSession
 		old.ConnectorData = []byte{}
 		return old, nil
 	}
